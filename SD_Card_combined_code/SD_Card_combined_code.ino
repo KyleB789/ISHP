@@ -2,7 +2,6 @@
   Adafruit invests time and resources providing this open source code,
   please support Adafruit and open-source hardware by purchasing
   products from Adafruit!
-
   Written by Limor Fried/Ladyada for Adafruit Industries.
   MIT license, all text above must be included in any redistribution
  ****************************************************/
@@ -13,13 +12,9 @@
 RTC_PCF8523 rtc;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
-//Motor Sheild
-#include <Adafruit_MotorShield.h>
-
-//SD card
-#include "SD.h"
+// SD Card - Adalogger
 #include "FS.h"
-
+#include "SD.h"
 
 // EINK
 #include "Adafruit_ThinkInk.h"
@@ -33,16 +28,14 @@ char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursd
 // 2.13" Monochrome displays with 250x122 pixels and SSD1675 chipset
 ThinkInk_213_Mono_B72 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
 
-
-//motor sheild
+// Motor Shield
+#include <Adafruit_MotorShield.h>
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *myMotor = AFMS.getMotor(4);
 
-//moisture sensor
+// Soil Moisture
 int moistureValue = 0; //value for storing moisture value
 int soilPin = 12;//Declare a variable for the soil moisture sensor
-
-
 
 
 void setup() {
@@ -51,7 +44,7 @@ void setup() {
     delay(10);
   }
 
-  //SD Card
+  // SD Card
   setupSD();
 
   // RTC
@@ -68,12 +61,12 @@ void setup() {
 
   //EINK
   display.begin(THINKINK_MONO);
-  display.clearBuffer(); setupSD();
+  display.clearBuffer();
+
   AFMS.begin();
   myMotor->setSpeed(255);
   logEvent("System Initialisation...");
 }
-
 
 void loop() {
 
@@ -89,7 +82,7 @@ void loop() {
   display.drawLine(0, 50, 250, 50, EPD_BLACK);
   display.display();
 
-
+  int moisture = readSoil();
   // waits 180 seconds (3 minutes) as per guidelines from adafruit.
   delay(180000);
   display.clearBuffer();
@@ -101,7 +94,6 @@ void drawText(String text, uint16_t color, int textSize, int x, int y) {
   display.setTextSize(textSize);
   display.setTextWrap(true);
   display.print(text);
-
 }
 
 String getDateTimeAsString() {
@@ -130,9 +122,7 @@ String getDateTimeAsString() {
   sprintf(humanReadableDate, "%02d:%02d:%02d %02d/%02d/%02d",  now.hour(), now.minute(), now.second(), now.day(), now.month(), now.year());
 
   return humanReadableDate;
-
 }
-
 
 
 void setupSD() {
@@ -148,7 +138,6 @@ void setupSD() {
   }
   Serial.println("SD Started");
 }
-
 
 void logEvent(String dataToLog) {
   /*
@@ -197,9 +186,10 @@ void logEvent(String dataToLog) {
   Serial.print(",");
   Serial.println(dataToLog);
 }
+
+//This is a function used to get the soil moisture content
 int readSoil()
 {
-
   moistureValue = analogRead(soilPin);//Read the SIG value form sensor
   return moistureValue;//send current moisture value
 }
