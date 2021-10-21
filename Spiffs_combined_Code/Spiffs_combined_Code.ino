@@ -58,7 +58,7 @@ void setup() {
   while (!Serial) {
     delay(10);
   }
-  delay(1000)
+  delay(1000);
   pinMode(LED_BUILTIN, OUTPUT);
   
   // RTC
@@ -178,43 +178,80 @@ void logEvent(String dataToLog) {
   Serial.println(logEntry);
 }
 
-// Log the event with the date, time and data
-logFile.print(rightNow.year(), DEC);
-logFile.print(",");
-logFile.print(rightNow.month(), DEC);
-logFile.print(",");
-logFile.print(rightNow.day(), DEC);
-logFile.print(",");
-logFile.print(rightNow.hour(), DEC);
-logFile.print(",");
-logFile.print(rightNow.minute(), DEC);
-logFile.print(",");
-logFile.print(rightNow.second(), DEC);
-logFile.print(",");
-logFile.print(dataToLog);
 
-// End the line with a return character.
-logFile.println();
-logFile.close();
-Serial.print("Event Logged: ");
-Serial.print(rightNow.year(), DEC);
-Serial.print(",");
-Serial.print(rightNow.month(), DEC);
-Serial.print(",");
-Serial.print(rightNow.day(), DEC);
-Serial.print(",");
-Serial.print(rightNow.hour(), DEC);
-Serial.print(",");
-Serial.print(rightNow.minute(), DEC);
-Serial.print(",");
-Serial.print(rightNow.second(), DEC);
-Serial.print(",");
-Serial.println(dataToLog);
-}
+
 
 //This is a function used to get the soil moisture content
 int readSoil()
 {
   moistureValue = analogRead(soilPin);//Read the SIG value form sensor
   return moistureValue;//send current moisture value
+}
+
+
+// SPIFFS file functions
+void readFile(fs::FS &fs, const char * path) {
+  Serial.printf("Reading file: %s\r\n", path);
+
+  File file = fs.open(path);
+  if (!file || file.isDirectory()) {
+    Serial.println("- failed to open file for reading");
+    return;
+  }
+
+  Serial.println("- read from file:");
+  while (file.available()) {
+    Serial.write(file.read());
+  }
+  file.close();
+}
+
+void writeFile(fs::FS &fs, const char * path, const char * message) {
+  Serial.printf("Writing file: %s\r\n", path);
+
+  File file = fs.open(path, FILE_WRITE);
+  if (!file) {
+    Serial.println("- failed to open file for writing");
+    return;
+  }
+  if (file.print(message)) {
+    Serial.println("- file written");
+  } else {
+    Serial.println("- write failed");
+  }
+  file.close();
+}
+
+void appendFile(fs::FS &fs, const char * path, const char * message) {
+  Serial.printf("Appending to file: %s\r\n", path);
+
+  File file = fs.open(path, FILE_APPEND);
+  if (!file) {
+    Serial.println("- failed to open file for appending");
+    return;
+  }
+  if (file.print(message)) {
+    Serial.println("- message appended");
+  } else {
+    Serial.println("- append failed");
+  }
+  file.close();
+}
+
+void renameFile(fs::FS &fs, const char * path1, const char * path2) {
+  Serial.printf("Renaming file %s to %s\r\n", path1, path2);
+  if (fs.rename(path1, path2)) {
+    Serial.println("- file renamed");
+  } else {
+    Serial.println("- rename failed");
+  }
+}
+
+void deleteFile(fs::FS &fs, const char * path) {
+  Serial.printf("Deleting file: %s\r\n", path);
+  if (fs.remove(path)) {
+    Serial.println("- file deleted");
+  } else {
+    Serial.println("- delete failed");
+  }
 }
