@@ -27,6 +27,8 @@ char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursd
 #include "wifiConfig.h"
 AsyncWebServer server(80);
 
+const char* http_username = "admin1";
+const char* http_password = "admin1";
 
 
 // EINK
@@ -56,7 +58,9 @@ void setup() {
   while (!Serial) {
     delay(10);
   }
-
+  delay(1000)
+  pinMode(LED_BUILTIN, OUTPUT);
+  
   // RTC
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
@@ -72,7 +76,8 @@ void setup() {
   //spiffs server
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
-    Serial.println("index");
+    if(!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
     request->send(SPIFFS, "/index.html", "text/html");
   });
   server.on("/dashboard", HTTP_GET, [](AsyncWebServerRequest * request) {
@@ -80,7 +85,8 @@ void setup() {
     request->send(SPIFFS, "/dashboard.html", "text/html");
   });
   server.on("/logOutput", HTTP_GET, [](AsyncWebServerRequest * request) {
-    Serial.println("output");
+    if(!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
     request->send(SPIFFS, "/logEvents.csv", "text/html", true);
   });
 
