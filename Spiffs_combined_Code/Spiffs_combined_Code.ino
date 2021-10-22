@@ -47,11 +47,17 @@ ThinkInk_213_Mono_B72 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
 #include <Adafruit_MotorShield.h>
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *myMotor = AFMS.getMotor(4);
+boolean pumpIsRunning = false;
 
 // Soil Moisture
 int moistureValue = 0; //value for storing moisture value
 int soilPin = 12;//Declare a variable for the soil moisture sensor
 
+//Temperature Sensor
+#include <Wire.h>
+#include "Adafruit_ADT7410.h"
+// Create the ADT7410 temperature sensor object
+Adafruit_ADT7410 tempsensor = Adafruit_ADT7410();
 
 void setup() {
   Serial.begin(9600);
@@ -60,7 +66,49 @@ void setup() {
   }
   delay(1000);
   pinMode(LED_BUILTIN, OUTPUT);
-  
+
+  //SPIFFS start up
+  if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
+
+    Serial.println("SPIFFS Mount Failed");
+    return;
+  }
+  if (!tempsensor.begin()) {
+    Serial.println("Couldn't find ADT7410!");
+    while (1);
+  }
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi..");
+  }
+  Serial.println();
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+
+
+  //spiffs server
+
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
+    request->send(SPIFFS, "/index.html", "text/html");
+  });
+  server.on("/dashboard", HTTP_GET, [](AsyncWebServerRequest * request) {
+    Serial.println("dashboard");
+    request->send(SPIFFS, "/dashboard.html", "text/html");
+  });
+  server.on("/logOutput", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
+    request->send(SPIFFS, "/logEvents.csv", "text/html", true);
+  });
+
   // RTC
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
@@ -73,23 +121,6 @@ void setup() {
 
   rtc.start();
 
-  //spiffs server
-
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
-    if(!request->authenticate(http_username, http_password))
-      return request->requestAuthentication();
-    request->send(SPIFFS, "/index.html", "text/html");
-  });
-  server.on("/dashboard", HTTP_GET, [](AsyncWebServerRequest * request) {
-    Serial.println("dashboard");
-    request->send(SPIFFS, "/dashboard.html", "text/html");
-  });
-  server.on("/logOutput", HTTP_GET, [](AsyncWebServerRequest * request) {
-    if(!request->authenticate(http_username, http_password))
-      return request->requestAuthentication();
-    request->send(SPIFFS, "/logEvents.csv", "text/html", true);
-  });
-
   //EINK
   display.begin(THINKINK_MONO);
   display.clearBuffer();
@@ -101,22 +132,69 @@ void setup() {
 
 void loop() {
 
-  // Gets the current date and time, and writes it to the Eink display.
-  String currentTime = getDateTimeAsString();
-
-  drawText("The Current Time and\nDate is", EPD_BLACK, 2, 0, 0);
-
-  // writes the current time on the bottom half of the display (y is height)
-  drawText(currentTime, EPD_BLACK, 2, 0, 75);
-
-  // Draws a line from the leftmost pixel, on line 50, to the rightmost pixel (250) on line 50.
-  display.drawLine(0, 50, 250, 50, EPD_BLACK);
-  display.display();
-
   int moisture = readSoil();
+  waterPlant(moisture);
+  updateEPD();
+
+
   // waits 180 seconds (3 minutes) as per guidelines from adafruit.
   delay(180000);
   display.clearBuffer();
+
+}
+
+void updateEPD() {
+  // Config
+  drawText(WiFi.localIP().toString(), EPD_BLACK, 2, 0, 0);
+  drawText(getTimeAsString(), EPD_BLACK, 1, 200, 0);
+  drawText(getDateAsString(), EPD_BLACK, 1, 190, 10);
+
+
+  // Draw lines to divvy up the EPD
+  display.drawLine(0, 20, 250, 20, EPD_BLACK);
+  display.drawLine(125, 20, 125, 122, EPD_BLACK);
+  display.drawLine(0, 75, 250, 75, EPD_BLACK);
+
+  drawText("Moisture", EPD_BLACK, 2, 0, 25);
+  drawText(String(moistureValue), EPD_BLACK, 4, 0, 45);
+
+  drawText("Pump", EPD_BLACK, 2, 130, 25);
+  if (pumpIsRunning) {
+    drawText("ON", EPD_BLACK, 4, 130, 45);
+  } else {
+    drawText("OFF", EPD_BLACK, 4, 130, 45);
+  }
+
+  drawText("Temp \tC", EPD_BLACK, 2, 0, 80);
+  drawText(String(tempsensor.readTempC()), EPD_BLACK, 4, 0, 95);
+
+  logEvent("Updating the EPD");
+  display.display();
+
+}
+
+String processor(const String& var) {
+  Serial.println(var);
+
+  if (var == "DATETIME") {
+    String datetime = getTimeAsString() + " " + getDateAsString();
+    return datetime;
+  }
+  if (var == "MOISTURE") {
+    readSoil();
+    return String(moistureValue);
+  }
+  if (var == "TEMPINC") {
+    return String(tempsensor.readTempC());
+  }
+  if (var == "PUMPSTATE") {
+    if (pumpIsRunning) {
+      return "ON";
+    } else {
+      return "OFF";
+    }
+  }
+  return String();
 }
 
 void drawText(String text, uint16_t color, int textSize, int x, int y) {
@@ -127,32 +205,24 @@ void drawText(String text, uint16_t color, int textSize, int x, int y) {
   display.print(text);
 }
 
-String getDateTimeAsString() {
+String getDateAsString() {
   DateTime now = rtc.now();
 
-  //Prints the date and time to the Serial monitor for debugging.
-  /*
-    Serial.print(now.year(), DEC);
-    Serial.print('/');
-    Serial.print(now.month(), DEC);
-    Serial.print('/');
-    Serial.print(now.day(), DEC);
-    Serial.print(" (");
-    Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
-    Serial.print(") ");
-    Serial.print(now.hour(), DEC);
-    Serial.print(':');
-    Serial.print(now.minute(), DEC);
-    Serial.print(':');
-    Serial.print(now.second(), DEC);
-    Serial.println();
-  */
-
-  // Converts the date and time into a human-readable format.
+  // Converts the date into a human-readable format.
   char humanReadableDate[20];
-  sprintf(humanReadableDate, "%02d:%02d:%02d %02d/%02d/%02d",  now.hour(), now.minute(), now.second(), now.day(), now.month(), now.year());
+  sprintf(humanReadableDate, "%02d/%02d/%02d", now.day(), now.month(), now.year());
 
   return humanReadableDate;
+}
+
+String getTimeAsString() {
+  DateTime now = rtc.now();
+
+  // Converts the time into a human-readable format.
+  char humanReadableTime[20];
+  sprintf(humanReadableTime, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+
+  return humanReadableTime;
 }
 
 void logEvent(String dataToLog) {
@@ -179,8 +249,6 @@ void logEvent(String dataToLog) {
 }
 
 
-
-
 //This is a function used to get the soil moisture content
 int readSoil()
 {
@@ -188,8 +256,28 @@ int readSoil()
   return moistureValue;//send current moisture value
 }
 
+void waterPlant(int moistureValue) {
+  /*
+     Write a function which takes the moisture value,
+     and if it's below a certain value, turns the pump on.
+     The function is to be called waterPlant() which will
+     take the moisture value as an argument, and return no value.
+     @param moistureValue int measured from Moisture Sensor
+     @return: void
+  */
+  if (moistureValue < 1000 ) {
+    // motor/pump on
+    myMotor->run(FORWARD); // May need to change to BACKWARD
+    pumpIsRunning = true;
+  } else {
+    // motor/pump off
+    myMotor->run(RELEASE);
+    pumpIsRunning = false;
+  }
 
-// SPIFFS file functions
+}
+
+//SPIFFS File Functions
 void readFile(fs::FS &fs, const char * path) {
   Serial.printf("Reading file: %s\r\n", path);
 
