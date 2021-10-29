@@ -1,38 +1,32 @@
-/***************************************************
-  Adafruit invests time and resources providing this open source code,
-  please support Adafruit and open-source hardware by purchasing
-  products from Adafruit!
-  Written by Limor Fried/Ladyada for Adafruit Industries.
-  MIT license, all text above must be included in any redistribution
- ****************************************************/
+//ISHP
 
-// RTC
-#include "RTClib.h"
 
-RTC_PCF8523 rtc;
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-
-// SD Card - Adalogger
-#include "FS.h"
-#include "SD.h"
-
-//Spiffs
 
 #define FORMAT_SPIFFS_IF_FAILED true
 
 // Wifi & Webserver
 #include "WiFi.h"
 #include "SPIFFS.h"
+#include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include "wifiConfig.h"
 AsyncWebServer server(80);
+// values for the html website.
 
-const char* http_username = "admin1";
-const char* http_password = "admin1";
+
+const char* http_username = "admin1"; //username for HTML website
+const char* http_password = "admin1"; //password for HTML website
+
+// RTC
+#include "RTClib.h"
+
+RTC_PCF8523 rtc;
+char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}; 
+//The 7 days of the week as variables for the date and time function.
 
 
 // EINK
-#include "Adafruit_ThinkInk.h"
+#include "Adafruit_ThinkInk.h" //includes adafruit thinkink library
 
 #define EPD_CS      15
 #define EPD_DC      33
@@ -41,17 +35,17 @@ const char* http_password = "admin1";
 #define EPD_BUSY    -1 // can set to -1 to not use a pin (will wait a fixed delay)
 
 // 2.13" Monochrome displays with 250x122 pixels and SSD1675 chipset
-ThinkInk_213_Mono_B72 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY);
+ThinkInk_213_Mono_B72 display(EPD_DC, EPD_RESET, EPD_CS, SRAM_CS, EPD_BUSY); 
 
-// Motor Shield
-#include <Adafruit_MotorShield.h>
+// Motor Shield, setup code for the pump motor
+#include <Adafruit_MotorShield.h> 
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_DCMotor *myMotor = AFMS.getMotor(4);
 boolean pumpIsRunning = false;
 
 // Soil Moisture
 int moistureValue = 0; //value for storing moisture value
-int soilPin = 12;//Declare a variable for the soil moisture sensor
+int soilPin = A2;//Declare a variable for the soil moisture sensor
 
 //Temperature Sensor
 #include <Wire.h>
@@ -60,16 +54,18 @@ int soilPin = 12;//Declare a variable for the soil moisture sensor
 Adafruit_ADT7410 tempsensor = Adafruit_ADT7410();
 
 void setup() {
-  Serial.begin(9600);
+  /*
+  */
+  Serial.begin(9600); //begins the serial monitor startup
   while (!Serial) {
     delay(10);
   }
   delay(1000);
-  pinMode(LED_BUILTIN, OUTPUT);
 
-  //SPIFFS start up
+
   if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
-
+    // Follow instructions in README and install
+    // https://github.com/me-no-dev/arduino-esp32fs-plugin
     Serial.println("SPIFFS Mount Failed");
     return;
   }
@@ -85,39 +81,71 @@ void setup() {
     Serial.println("Connecting to WiFi..");
   }
   Serial.println();
-  Serial.print("Connected to ");
-  Serial.println(ssid);
+  Serial.print("Connected to the Internet");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
+  pinMode(LED_BUILTIN, OUTPUT);
 
-
-  //spiffs server
-
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
+//startup for the HTML webserver, aswell as authentication for access.
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) { 
     if (!request->authenticate(http_username, http_password))
       return request->requestAuthentication();
     request->send(SPIFFS, "/index.html", "text/html");
   });
   server.on("/dashboard", HTTP_GET, [](AsyncWebServerRequest * request) {
-    Serial.println("dashboard");
-    request->send(SPIFFS, "/dashboard.html", "text/html");
-  });
-  server.on("/logOutput", HTTP_GET, [](AsyncWebServerRequest * request) {
     if (!request->authenticate(http_username, http_password))
       return request->requestAuthentication();
+    request->send(SPIFFS, "/dashboard.html", "text/html", false, processor);
+  });
+
+  //LED Controls,turns LED on and off based on situation
+  server.on("/LEDOn", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
+    digitalWrite(LED_BUILTIN, HIGH);
+    request->send(SPIFFS, "/dashboard.html", "text/html", false, processor);
+  });
+  server.on("/LEDOff", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
+    digitalWrite(LED_BUILTIN, LOW);
+    request->send(SPIFFS, "/dashboard.html", "text/html", false, processor);
+  });
+
+  // Pump Controls, turns water pump on and off based on situation
+  server.on("/PumpOn", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
+    myMotor->run(FORWARD); // May need to change to BACKWARD
+    pumpIsRunning = true;
+    request->send(SPIFFS, "/dashboard.html", "text/html", false, processor);
+  });
+  server.on("/PumpOff", HTTP_GET, [](AsyncWebServerRequest * request) {
+    if (!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
+    myMotor->run(RELEASE);
+    pumpIsRunning = false;
+    request->send(SPIFFS, "/dashboard.html", "text/html", false, processor);
+  });
+
+  server.on("/logOutput", HTTP_GET, [](AsyncWebServerRequest * request) {
+    Serial.println("output");
     request->send(SPIFFS, "/logEvents.csv", "text/html", true);
   });
+
+  server.begin();
+
 
   // RTC
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
     Serial.flush();
-    abort();
+    //    abort();
   }
 
   // The following line can be uncommented if the time needs to be reset.
-  //  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
   rtc.start();
 
@@ -131,7 +159,6 @@ void setup() {
 }
 
 void loop() {
-
   int moisture = readSoil();
   waterPlant(moisture);
   updateEPD();
@@ -144,10 +171,15 @@ void loop() {
 }
 
 void updateEPD() {
+
+  // Indigenous Country Name
+  drawText("Gurindji", EPD_BLACK, 2, 0, 0);
+
+
   // Config
-  drawText(WiFi.localIP().toString(), EPD_BLACK, 2, 0, 0);
-  drawText(getTimeAsString(), EPD_BLACK, 1, 200, 0);
-  drawText(getDateAsString(), EPD_BLACK, 1, 190, 10);
+  drawText(WiFi.localIP().toString(), EPD_BLACK, 1, 130, 80);
+  drawText(getTimeAsString(), EPD_BLACK, 1, 130, 100);
+  drawText(getDateAsString(), EPD_BLACK, 1, 130, 110);
 
 
   // Draw lines to divvy up the EPD
@@ -250,21 +282,14 @@ void logEvent(String dataToLog) {
 
 
 //This is a function used to get the soil moisture content
-int readSoil()
-{
+int readSoil() {
+  logEvent("Reading Moisture Value");
   moistureValue = analogRead(soilPin);//Read the SIG value form sensor
   return moistureValue;//send current moisture value
 }
 
 void waterPlant(int moistureValue) {
-  /*
-     Write a function which takes the moisture value,
-     and if it's below a certain value, turns the pump on.
-     The function is to be called waterPlant() which will
-     take the moisture value as an argument, and return no value.
-     @param moistureValue int measured from Moisture Sensor
-     @return: void
-  */
+  
   if (moistureValue < 1000 ) {
     // motor/pump on
     myMotor->run(FORWARD); // May need to change to BACKWARD
